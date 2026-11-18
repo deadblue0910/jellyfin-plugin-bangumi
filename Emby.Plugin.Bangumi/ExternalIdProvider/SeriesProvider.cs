@@ -96,9 +96,9 @@ public class SeriesProvider(BangumiApi api, ILogger log)
             var characters = await CastLocalizer.GetCharactersAsync(api, subject.Id, cancellationToken);
             if (characters != null)
             {
-                var people = CastLocalizer.ToPeople(characters);
-                await CastLocalizer.LocalizeAsync(api, subject.Id, characters, people, log, cancellationToken);
-                people.ForEach(result.AddPerson);
+                var entries = CastLocalizer.ToPeople(characters);
+                await CastLocalizer.LocalizeAsync(api, subject.Id, characters, entries, log, cancellationToken);
+                entries.ForEach(entry => result.AddPerson(entry.Info));
             }
         }
         catch (Exception ex)

@@ -99,43 +99,54 @@ public static class CastLocalizer
     /// <summary>
     ///     把角色列表摊平成演职人员列表，语义与共享的 <c>GetSubjectCharacters</c> 一致
     ///     （每个角色 × 每个演员一条，图片地址归一化）。
+    ///     <para>
+    ///     返回值保留「这条 PersonInfo 属于哪个角色」的对应关系，回填时按角色 id 精确匹配。
+    ///     按名字匹配在「两个不同角色同名」时会互相串名，而 <see cref="PersonInfo.Role" /> 是纯字符串，
+    ///     交给 Emby 之后就无法再区分，所以只能在摊平阶段把 id 带出来。
+    ///     </para>
     /// </summary>
-    public static List<PersonInfo> ToPeople(IEnumerable<RelatedCharacter> characters)
+    public static List<CastEntry> ToPeople(IEnumerable<RelatedCharacter> characters)
     {
-        return characters
-            .SelectMany(character => character.ToPersonInfos())
-            .Select(info =>
+        var entries = new List<CastEntry>();
+        foreach (var character in characters)
+        {
+            foreach (var info in character.ToPersonInfos())
             {
                 info.ImageUrl = ImageUrlNormalizer.Normalize(info.ImageUrl);
-                return info;
-            })
-            .ToList();
+                entries.Add(new CastEntry(info, character.Id));
+            }
+        }
+
+        return entries;
     }
 
     /// <summary>
-    ///     就地修改 <paramref name="people" /> 里的 Role。<b>任何失败都只影响单个角色</b>，
+    ///     一条演职人员记录，以及它属于哪个 Bangumi 角色。
+    /// </summary>
+    public readonly record struct CastEntry(PersonInfo Info, int CharacterId);
+
+    /// <summary>
+    ///     就地修改 <paramref name="entries" /> 里每条记录的 Role。<b>任何失败都只影响单个角色</b>，
     ///     最坏情况是保留原名，绝不丢整批演职人员。
     /// </summary>
     public static async Task LocalizeAsync(BangumiApi api, int subjectId, IReadOnlyList<RelatedCharacter> characters,
-        IReadOnlyCollection<PersonInfo> people, ILogger log, CancellationToken token)
+        IReadOnlyList<CastEntry> entries, ILogger log, CancellationToken token)
     {
-        if (!Enabled || subjectId <= 0 || characters == null || characters.Count == 0 || people == null || people.Count == 0)
+        if (!Enabled || subjectId <= 0 || characters == null || characters.Count == 0 || entries == null || entries.Count == 0)
             return;
 
         EnsureLoaded();
 
-        // 过滤通用占位角色（声の出演 等）并按角色名去重：
-        // 同一个角色名只需要查一次中文名，映射本来也是按名字做的。
-        var candidates = characters
+        // 过滤通用占位角色（声の出演 等）后按角色 id 去重（同一条目里角色 id 不会重复，这里只是兜底）。
+        var lookups = characters
             .Where(character => !IsGenericRoleName(character.Name))
-            .GroupBy(character => character.Name, StringComparer.Ordinal)
+            .GroupBy(character => character.Id)
             .Select(group => group.First())
             .ToList();
 
         // 超过预算时只翻优先度高的那部分（characters 已按 主角→配角→客串 排序），不再整条跳过。
-        var lookups = candidates.Count > MaxLookupsPerSubject
-            ? candidates.Take(MaxLookupsPerSubject).ToList()
-            : candidates;
+        if (lookups.Count > MaxLookupsPerSubject)
+            lookups = lookups.Take(MaxLookupsPerSubject).ToList();
 
         if (lookups.Count == 0)
         {
@@ -151,30 +162,31 @@ public static class CastLocalizer
 
             var tasks = lookups
                 .Select(async character => (
+                    character.Id,
                     character.Name,
                     Translated: await TranslateCharacterAsync(api, character.Id, semaphore, log, token).ConfigureAwait(false)))
                 .ToList();
             var results = await Task.WhenAll(tasks).ConfigureAwait(false);
 
-            var roleMap = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var (original, translated) in results)
+            // 角色 id → 中文名。同名不同角色各自独立，不会再互相串名。
+            var roleMap = new Dictionary<int, string>();
+            foreach (var (id, original, translated) in results)
                 if (!string.IsNullOrEmpty(original) && !string.IsNullOrEmpty(translated) && original != translated)
-                    roleMap[original] = translated;
+                    roleMap[id] = translated;
 
             if (skipped > 0)
-                log.Info("Bangumi: 条目 {0} 共 {1} 个角色，跳过 {2} 个通用/重复/超限，实际查询 {3} 个",
+                log.Info("Bangumi: 条目 {0} 共 {1} 个角色，跳过 {2} 个通用/超限，实际查询 {3} 个",
                     subjectId, characters.Count, skipped, lookups.Count);
 
             if (roleMap.Count == 0)
                 return;
 
             var changed = 0;
-            foreach (var person in people)
+            foreach (var entry in entries)
             {
-                if (string.IsNullOrEmpty(person.Role)) continue;
-                if (!roleMap.TryGetValue(person.Role, out var role)) continue;
-                if (role == person.Role) continue;
-                person.Role = role;
+                if (!roleMap.TryGetValue(entry.CharacterId, out var role)) continue;
+                if (entry.Info.Role == role) continue;
+                entry.Info.Role = role;
                 changed++;
             }
 

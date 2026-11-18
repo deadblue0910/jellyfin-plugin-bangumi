@@ -51,7 +51,7 @@ Copy-Item tools\pre-push .git\hooks\pre-push
 | 文件 | 作用 |
 |---|---|
 | `Emby.Plugin.Bangumi/BangumiApi.EmbyCast.cs` | partial 扩展：`GetSubjectRelatedCharacters()`（`/v0/subjects/{id}/characters`）、`GetCharacterDetail()`（`/v0/characters/{id}`）。共享部分 `BaseUrl` 是 private，只能在同类内拼 URL |
-| `Emby.Plugin.Bangumi/Cast/CastLocalizer.cs` | **角色名中文化**：只把 `PersonInfo.Role` 换成 Bangumi infobox 里的「简体中文名」，**不动 `Name`**（理由见下）；缓存：角色列表按 subject 缓存 10 分钟（同一 subject 一轮刷新只请求一次）、角色中文名进程内缓存并落盘到 `BangumiCast.json`；并发 3、单条目上限 20 角色 |
+| `Emby.Plugin.Bangumi/Cast/CastLocalizer.cs` | **角色名中文化**：只把 `PersonInfo.Role` 换成 Bangumi infobox 里的「简体中文名」，**不动 `Name`**（理由见下）；摊平演职人员时保留「这条记录属于哪个角色 id」，回填按**角色 id 精确匹配**，同名不同角色不会互相串名；缓存：角色列表按 subject 缓存 10 分钟、角色中文名进程内缓存并落盘到 `BangumiCast.json`；并发 3、单条目上限 40 次查询 |
 
 ## 已实现的功能（相对上游 Emby）
 
@@ -62,7 +62,7 @@ Copy-Item tools\pre-push .git\hooks\pre-push
 
 已知限制（详见 `PLAN`/对话记录）：
 
-- 翻译请求为 `1 + N` 次/条目（N = 需要查询的角色数，首次、缓存未命中时）：会先过滤「声の出演」这类通用占位角色、再按角色名去重，单条目最多查询 40 个（超出只翻优先度高的主角/配角，不再整条跳过）；角色列表 10 分钟内复用，角色中文名落盘后重启不再请求。不再请求 `/v0/persons/{id}`。
+- 翻译请求为 `1 + N` 次/条目（N = 需要查询的角色数，首次、缓存未命中时）：先过滤「声の出演」这类通用占位角色，再按角色 id 逐个查询；单条目最多查询 40 个（超出只翻优先度高的主角/配角，不再整条跳过）；角色列表 10 分钟内复用，角色中文名落盘后重启不再请求。不再请求 `/v0/persons/{id}`。
 - **演员名保持原名**（不翻译 `Name`）。这样与上游插件互换时人物实体不变、不会产生重复人物；代价是演职人员列表里演员仍显示日文名。
 - 未实现「把角色当作演职人员」（PR #256 的 `AddCharacterToPerson`）：Emby 不认 `c{id}` 前缀、没有人物图片 provider，会污染全局人物库。
 

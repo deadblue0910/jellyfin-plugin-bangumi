@@ -86,9 +86,9 @@ public class MovieProvider(BangumiApi api, ILogger logger)
             var characters = await CastLocalizer.GetCharactersAsync(api, subject.Id, cancellationToken);
             if (characters != null)
             {
-                var people = CastLocalizer.ToPeople(characters);
-                await CastLocalizer.LocalizeAsync(api, subject.Id, characters, people, logger, cancellationToken);
-                people.ForEach(result.AddPerson);
+                var entries = CastLocalizer.ToPeople(characters);
+                await CastLocalizer.LocalizeAsync(api, subject.Id, characters, entries, logger, cancellationToken);
+                entries.ForEach(entry => result.AddPerson(entry.Info));
             }
         }
         catch (Exception ex)
