@@ -53,6 +53,24 @@
 3. Emby 侧 `Plugin.cs` 没有注册代码，新 provider 类丢进程序集即被发现；不要照抄 Jellyfin 的 `PluginServiceRegistrator`。
 4. 注意 C# 语言版本：上游把 `LangVersion` 拼成了 `LangvVersion`（不生效），net6.0 默认落到 C# 10 —— 别用 C# 11/12 语法。
 
+## 本地验证环境
+
+| 项 | 值 |
+|---|---|
+| Emby | `D:\Emby`（便携版，数据在 `D:\Emby\programdata`），启动脚本 `D:\Emby\start-emby.ps1` |
+| Emby 版本 | **4.10.2.0**（下载的是 4.9.1.90 包，首次启动自动更新到 4.10.2） |
+| 插件部署位置 | `D:\Emby\programdata\plugins\`（**dll 直接放这里，不建子目录**） |
+| .NET SDK | 10.0.404（`C:\Program Files\dotnet`） |
+| 验证结果 | 插件加载成功：`Loading Emby.Plugin.Bangumi, Version=1.7.1.0` + `Starting entry point ...PlaybackScrobbler` |
+
+构建 + 部署一条命令：
+
+```powershell
+dotnet build Emby.Plugin.Bangumi/Emby.Plugin.Bangumi.csproj -c Release
+Copy-Item Emby.Plugin.Bangumi\bin\Release\net6.0\Emby.Plugin.Bangumi.dll D:\Emby\programdata\plugins\ -Force
+# 然后重启 Emby（D:\Emby\start-emby.ps1）
+```
+
 ## 同步上游后的检查
 
 - [ ] `dotnet build Emby.Plugin.Bangumi/Emby.Plugin.Bangumi.csproj -c Release` 通过
