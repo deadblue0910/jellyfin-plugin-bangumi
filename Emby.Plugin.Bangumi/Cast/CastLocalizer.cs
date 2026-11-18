@@ -30,10 +30,18 @@ public static class CastLocalizer
     private const int MaxConcurrency = 3;
 
     /// <summary>
-    ///     单个条目最多发多少次「角色详情」请求。
-    ///     超出时只翻译优先度高的角色（主角 → 配角 → 客串），**不再整条跳过**。
+    ///     单个条目最多发多少次「角色详情」请求，来自配置项 <c>MaxCastLookups</c>。
+    ///     0 表示不限制；超出上限时只翻译优先度高的角色（主角 → 配角 → 客串），不再整条跳过。
     /// </summary>
-    private const int MaxLookupsPerSubject = 40;
+    private static int MaxLookupsPerSubject
+    {
+        get
+        {
+            var configured = Plugin.Instance?.Configuration?.MaxCastLookups ?? 60;
+            if (configured <= 0) return int.MaxValue;
+            return Math.Min(configured, 500);
+        }
+    }
 
     /// <summary>
     ///     通用占位角色名：这类条目的「角色名」只是表示「有配音」，没有独立的角色释义，

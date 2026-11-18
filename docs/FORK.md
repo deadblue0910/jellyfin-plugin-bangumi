@@ -23,7 +23,7 @@
 
 | 文件 | 层级 | 改了什么 | 为什么 |
 |---|---|---|---|
-| _（暂无）_ | | | |
+| `Jellyfin.Plugin.Bangumi/Configuration/PluginConfiguration.cs` | L2 | 在 `#if EMBY` 里加了 `MaxCastLookups`（默认 60，0 = 不限制） | 角色名翻译的单条目查询上限需要可配置。放在 `#if EMBY` 内，Jellyfin 侧编译结果与上游完全一致 |
 
 > 上游 `Emby.Plugin.Bangumi.csproj` 链接的共享文件：`BangumiApi.cs`、`Configuration/PluginConfiguration.cs`、`Model/*.cs`、`Utils/ImageUrlNormalizer.cs`、`OAuth/*.cs`（排除 `OAuthController.cs`）、`ScheduledTask/RatingRefreshTask.cs`、`ScheduledTask/TokenRefreshTask.cs`。改这些等于同时改 Jellyfin 插件。
 
@@ -62,7 +62,8 @@ Copy-Item tools\pre-push .git\hooks\pre-push
 
 已知限制（详见 `PLAN`/对话记录）：
 
-- 翻译请求为 `1 + N` 次/条目（N = 需要查询的角色数，首次、缓存未命中时）：先过滤「声の出演」这类通用占位角色，再按角色 id 逐个查询；单条目最多查询 40 个（超出只翻优先度高的主角/配角，不再整条跳过）；角色列表 10 分钟内复用，角色中文名落盘后重启不再请求。不再请求 `/v0/persons/{id}`。
+- 翻译请求为 `1 + N` 次/条目（N = 需要查询的角色数，首次、缓存未命中时）：先过滤「声の出演」这类通用占位角色，再按角色 id 逐个查询；单条目上限由配置项 **单个条目最多查询角色数**（`MaxCastLookups`，默认 60）控制，超出只翻优先度高的主角/配角，0 表示不限制；角色列表 10 分钟内复用，角色中文名落盘后重启不再请求。不再请求 `/v0/persons/{id}`。
+- 查询失败不会写缓存（下次刷新自动重试）；只有「查询成功但没有中文名」才缓存空值并长期跳过。
 - **演员名保持原名**（不翻译 `Name`）。这样与上游插件互换时人物实体不变、不会产生重复人物；代价是演职人员列表里演员仍显示日文名。
 - 未实现「把角色当作演职人员」（PR #256 的 `AddCharacterToPerson`）：Emby 不认 `c{id}` 前缀、没有人物图片 provider，会污染全局人物库。
 

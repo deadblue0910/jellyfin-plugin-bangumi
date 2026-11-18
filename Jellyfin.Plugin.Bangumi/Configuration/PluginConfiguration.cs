@@ -37,6 +37,14 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public TranslationPreferenceType PersonTranslationPreference { get; set; } = TranslationPreferenceType.Original;
 
+#if EMBY
+    /// <summary>
+    ///     Emby 侧：单个条目最多查询多少个角色的中文名（0 表示不限制）。
+    ///     超过时只翻译优先度高的角色（主角 → 配角 → 客串），避免一次刷新打出上百个请求。
+    /// </summary>
+    public int MaxCastLookups { get; set; } = 60;
+#endif
+
     public int RequestTimeout { get; set; } = 5000;
 
     public string BaseServerUrl { get; set; } = "https://api.bgm.tv";

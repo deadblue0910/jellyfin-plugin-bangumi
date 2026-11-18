@@ -152,6 +152,13 @@
                     </div>
                 </div>
                 <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxCastLookups">单个条目最多查询角色数</label>
+                    <input class="emby-input" id="MaxCastLookups" type="number" min="0" max="500" step="10" />
+                    <div class="fieldDescription">
+                        翻译角色名时，单个条目最多查询多少个角色；超出时按「主角 → 配角 → 客串」优先。0 表示不限制。
+                    </div>
+                </div>
+                <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="BaseServerUrl">Bangumi API 地址</label>
                     <input class="emby-input" id="BaseServerUrl" type="url" />
                     <div class="fieldDescription">官方 API 部署在海外，请确保 Emby 上能够稳定访问或配置反代站点。</div>
