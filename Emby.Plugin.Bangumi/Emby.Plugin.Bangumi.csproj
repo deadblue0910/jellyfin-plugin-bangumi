@@ -13,9 +13,9 @@
       必须随每次发版递增：Emby 的插件页 ETag 由插件版本决定，
       版本不变时浏览器会一直复用缓存里的旧配置页（304），看不到新 UI。
     -->
-    <Version>1.7.8.1001</Version>
-    <AssemblyVersion>1.7.8.1001</AssemblyVersion>
-    <FileVersion>1.7.8.1001</FileVersion>
+    <Version>1.7.8.1002</Version>
+    <AssemblyVersion>1.7.8.1002</AssemblyVersion>
+    <FileVersion>1.7.8.1002</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

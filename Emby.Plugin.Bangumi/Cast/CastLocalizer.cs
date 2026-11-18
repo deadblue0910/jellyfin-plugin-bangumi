@@ -30,9 +30,16 @@ public static class CastLocalizer
     private const int MaxConcurrency = 3;
 
     /// <summary>
-    ///     单个条目最多翻译多少个角色；超出直接跳过，避免一次刷新打出上百个请求。
+    ///     单个条目最多发多少次「角色详情」请求。
+    ///     超出时只翻译优先度高的角色（主角 → 配角 → 客串），**不再整条跳过**。
     /// </summary>
-    private const int MaxCharactersPerSubject = 20;
+    private const int MaxLookupsPerSubject = 40;
+
+    /// <summary>
+    ///     通用占位角色名：这类条目的「角色名」只是表示「有配音」，没有独立的角色释义，
+    ///     查中文名既浪费请求又会把同一个 Role 文本映射成同一个名字；直接跳过。
+    /// </summary>
+    private static readonly string[] GenericRoleKeywords = new[] { "声の出演", "声のみ", "ボイス", "配音演员" };
 
     /// <summary>
     ///     角色列表的缓存有效期。一轮刷新里 Series 和 Season 会先后拿同一个 subject，
@@ -115,20 +122,34 @@ public static class CastLocalizer
         if (!Enabled || subjectId <= 0 || characters == null || characters.Count == 0 || people == null || people.Count == 0)
             return;
 
-        if (characters.Count > MaxCharactersPerSubject)
+        EnsureLoaded();
+
+        // 过滤通用占位角色（声の出演 等）并按角色名去重：
+        // 同一个角色名只需要查一次中文名，映射本来也是按名字做的。
+        var candidates = characters
+            .Where(character => !IsGenericRoleName(character.Name))
+            .GroupBy(character => character.Name, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
+
+        // 超过预算时只翻优先度高的那部分（characters 已按 主角→配角→客串 排序），不再整条跳过。
+        var lookups = candidates.Count > MaxLookupsPerSubject
+            ? candidates.Take(MaxLookupsPerSubject).ToList()
+            : candidates;
+
+        if (lookups.Count == 0)
         {
-            log.Info("Bangumi: 条目 {0} 有 {1} 个角色，超过上限 {2}，跳过角色名翻译",
-                subjectId, characters.Count, MaxCharactersPerSubject);
+            log.Debug("Bangumi: 条目 {0} 没有需要翻译的角色名", subjectId);
             return;
         }
 
-        EnsureLoaded();
+        var skipped = characters.Count - lookups.Count;
 
         try
         {
             using var semaphore = new SemaphoreSlim(MaxConcurrency);
 
-            var tasks = characters
+            var tasks = lookups
                 .Select(async character => (
                     character.Name,
                     Translated: await TranslateCharacterAsync(api, character.Id, semaphore, log, token).ConfigureAwait(false)))
@@ -139,6 +160,10 @@ public static class CastLocalizer
             foreach (var (original, translated) in results)
                 if (!string.IsNullOrEmpty(original) && !string.IsNullOrEmpty(translated) && original != translated)
                     roleMap[original] = translated;
+
+            if (skipped > 0)
+                log.Info("Bangumi: 条目 {0} 共 {1} 个角色，跳过 {2} 个通用/重复/超限，实际查询 {3} 个",
+                    subjectId, characters.Count, skipped, lookups.Count);
 
             if (roleMap.Count == 0)
                 return;
@@ -168,6 +193,22 @@ public static class CastLocalizer
         {
             SaveCache();
         }
+    }
+
+    /// <summary>
+    ///     判断是否是「声の出演」这类通用占位角色名：角色名本身没有角色释义，
+    ///     查中文名既浪费请求，又会让同一个 Role 文本被错误地映射成某个具体角色名。
+    /// </summary>
+    private static bool IsGenericRoleName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return true;
+
+        foreach (var keyword in GenericRoleKeywords)
+            if (name.Contains(keyword, StringComparison.Ordinal))
+                return true;
+
+        return false;
     }
 
     private static async Task<string> TranslateCharacterAsync(BangumiApi api, int id, SemaphoreSlim semaphore,
