@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Bangumi.Cast;
 using Jellyfin.Plugin.Bangumi.Configuration;
 using Jellyfin.Plugin.Bangumi.Model;
 using Jellyfin.Plugin.Bangumi.Utils;
@@ -92,14 +93,14 @@ public class SeriesProvider(BangumiApi api, ILogger log)
 
         try
         {
-            (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
+            var characters = (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList();
+            await CastLocalizer.LocalizeAsync(api, subject.Id, characters, log, cancellationToken);
+            characters.ForEach(result.AddPerson);
         }
         catch (Exception ex)
         {
             log.Error("Failed to get person infos for subject {0} : {1}", subject.Id, ex);
         }
-
-        (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
 
         return result;
     }

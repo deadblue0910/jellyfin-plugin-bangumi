@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Bangumi.Cast;
 using Jellyfin.Plugin.Bangumi.Configuration;
 using Jellyfin.Plugin.Bangumi.Model;
 using MediaBrowser.Common.Net;
@@ -80,7 +81,10 @@ public class SeasonProvider(BangumiApi api, ILogger log)
             result.Item.OfficialRating = "X";
 
         (await api.GetSubjectPersonInfos(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
-        (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
+
+        var characters = (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList();
+        await CastLocalizer.LocalizeAsync(api, subject.Id, characters, log, cancellationToken);
+        characters.ForEach(result.AddPerson);
 
         return result;
     }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Bangumi.Cast;
 using Jellyfin.Plugin.Bangumi.Configuration;
 using Jellyfin.Plugin.Bangumi.Utils;
 using MediaBrowser.Common.Net;
@@ -82,7 +83,9 @@ public class MovieProvider(BangumiApi api, ILogger logger)
 
         try
         {
-            (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
+            var characters = (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList();
+            await CastLocalizer.LocalizeAsync(api, subject.Id, characters, logger, cancellationToken);
+            characters.ForEach(result.AddPerson);
         }
         catch (Exception ex)
         {

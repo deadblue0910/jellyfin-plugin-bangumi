@@ -31,7 +31,21 @@
 
 | 文件 | 作用 |
 |---|---|
-| _（暂无）_ | |
+| `Emby.Plugin.Bangumi/BangumiApi.EmbyCast.cs` | partial 扩展：`GetSubjectRelatedCharacters()`（`/v0/subjects/{id}/characters`）、`GetCharacterDetail()`（`/v0/characters/{id}`）。共享部分 `BaseUrl` 是 private，只能在同类内拼 URL |
+| `Emby.Plugin.Bangumi/Cast/CastLocalizer.cs` | 演职人员中文化：把 `PersonInfo.Name`（演员）和 `PersonInfo.Role`（角色）换成 infobox 里的「简体中文名」；并发 3、单条目上限 20 角色 / 40 演员、进程内正负缓存 |
+
+## 已实现的功能（相对上游 Emby）
+
+| 功能 | 开关 | 实现位置 | 备注 |
+|---|---|---|---|
+| 演职人员中文化 | 配置页「人物翻译」= 优先使用中文翻译（`PersonTranslationPreference`） | `Cast/CastLocalizer.cs` + 三个 provider 调用点 | 移植上游 PR #256 的核心语义（该 PR 用 `#if !EMBY` 把 Emby 排除了）。`Name`/`Role` 都翻译 |
+| 配置页补上「人物翻译」下拉框 | — | `Configuration/ConfigPage.html` | 共享配置里一直有 `PersonTranslationPreference`（默认 `Original`），但 Emby 配置页从未提供入口，导致该开关在 Emby 侧改不了 |
+
+已知限制（详见 `PLAN`/对话记录）：
+
+- 翻译请求为 `1 + N角色 + M演员` 次/条目，Emby 无 HTTP 缓存层，目前只有进程内缓存；重启 Emby 后首次刷新会重新请求。
+- 修改 `PersonInfo.Name` 可能让 Emby 认为人物改名而新建 Person 条目，**需要实测确认是否会重复**；若重复严重，可退化为只翻译 `Role`。
+- 未实现「把角色当作演职人员」（PR #256 的 `AddCharacterToPerson`）：Emby 不认 `c{id}` 前缀、没有人物图片 provider，会污染全局人物库。
 
 ## 移植清单（Jellyfin → Emby）
 
