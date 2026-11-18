@@ -161,25 +161,42 @@ public static class CastLocalizer
             using var semaphore = new SemaphoreSlim(MaxConcurrency);
 
             var tasks = lookups
-                .Select(async character => (
-                    character.Id,
-                    character.Name,
-                    Translated: await TranslateCharacterAsync(api, character.Id, semaphore, log, token).ConfigureAwait(false)))
+                .Select(async character => await TranslateCharacterAsync(api, character.Id, semaphore, log, token).ConfigureAwait(false))
                 .ToList();
             var results = await Task.WhenAll(tasks).ConfigureAwait(false);
 
             // 角色 id → 中文名。同名不同角色各自独立，不会再互相串名。
+            // 只有「查询成功且确实有中文名」的才进映射；查询失败的不缓存，下次刷新会重试。
             var roleMap = new Dictionary<int, string>();
-            foreach (var (id, original, translated) in results)
-                if (!string.IsNullOrEmpty(original) && !string.IsNullOrEmpty(translated) && original != translated)
-                    roleMap[id] = translated;
+            var succeeded = 0;
+            var failed = 0;
+            for (var i = 0; i < results.Length; i++)
+            {
+                var result = results[i];
+                if (!result.Ok)
+                {
+                    failed++;
+                    continue;
+                }
+
+                succeeded++;
+                if (!string.IsNullOrEmpty(result.Translated))
+                    roleMap[lookups[i].Id] = result.Translated;
+            }
 
             if (skipped > 0)
                 log.Info("Bangumi: 条目 {0} 共 {1} 个角色，跳过 {2} 个通用/超限，实际查询 {3} 个",
                     subjectId, characters.Count, skipped, lookups.Count);
 
             if (roleMap.Count == 0)
+            {
+                if (failed > 0)
+                    log.Warn("Bangumi: 条目 {0} 有 {1} 个角色查询失败（未缓存，下次刷新重试），本次无翻译",
+                        subjectId, failed);
+                else if (succeeded > 0)
+                    log.Info("Bangumi: 条目 {0} 查询了 {1} 个角色，均无简体中文名，保持原名", subjectId, succeeded);
                 return;
+            }
 
             var changed = 0;
             foreach (var entry in entries)
@@ -191,7 +208,8 @@ public static class CastLocalizer
             }
 
             if (changed > 0)
-                log.Info("Bangumi: 条目 {0} 已翻译 {1} 个角色名", subjectId, changed);
+                log.Info("Bangumi: 条目 {0} 已翻译 {1} 个角色名（查询 {2} 个，失败 {3} 个）",
+                    subjectId, changed, succeeded, failed);
         }
         catch (OperationCanceledException)
         {
@@ -203,7 +221,7 @@ public static class CastLocalizer
         }
         finally
         {
-            SaveCache();
+            SaveCache(log);
         }
     }
 
@@ -223,21 +241,36 @@ public static class CastLocalizer
         return false;
     }
 
-    private static async Task<string> TranslateCharacterAsync(BangumiApi api, int id, SemaphoreSlim semaphore,
-        ILogger log, CancellationToken token)
+    /// <summary>
+    ///     查询单个角色的简体中文名。
+    ///     返回值里的 <c>Ok</c> 表示这次查询是否真的成功：
+    ///     只有成功才允许写缓存，避免一次网络故障把「没有中文名」永久钉死。
+    ///     成功但没有中文名时缓存空字符串，下次直接跳过。
+    /// </summary>
+    private static async Task<(bool Ok, string Translated)> TranslateCharacterAsync(BangumiApi api, int id,
+        SemaphoreSlim semaphore, ILogger log, CancellationToken token)
     {
-        if (id <= 0) return string.Empty;
-        if (CharacterNames.TryGetValue(id, out var cached)) return cached;
+        if (id <= 0) return (false, string.Empty);
+        if (CharacterNames.TryGetValue(id, out var cached)) return (true, cached);
 
         await semaphore.WaitAsync(token).ConfigureAwait(false);
         try
         {
-            if (CharacterNames.TryGetValue(id, out cached)) return cached;
+            if (CharacterNames.TryGetValue(id, out cached)) return (true, cached);
+
             var detail = await api.GetCharacterDetail(id, token).ConfigureAwait(false);
-            var translated = detail?.TranslatedName ?? string.Empty;
-            CharacterNames[id] = translated;
+            if (detail == null)
+            {
+                // 请求失败/被限流：不写缓存，下次刷新重试。
+                log.Debug("Bangumi: 角色 {0} 查询无结果，本次不缓存", id);
+                return (false, string.Empty);
+            }
+
+            var translated = detail.TranslatedName;
+            var value = string.IsNullOrEmpty(translated) || translated == detail.Name ? string.Empty : translated;
+            CharacterNames[id] = value;
             _dirty = true;
-            return translated;
+            return (true, value);
         }
         catch (OperationCanceledException)
         {
@@ -245,10 +278,8 @@ public static class CastLocalizer
         }
         catch (Exception ex)
         {
-            log.Debug("Bangumi: 角色 {0} 翻译失败: {1}", id, ex.Message);
-            CharacterNames[id] = string.Empty;
-            _dirty = true;
-            return string.Empty;
+            log.Debug("Bangumi: 角色 {0} 翻译失败（不缓存）: {1}", id, ex.Message);
+            return (false, string.Empty);
         }
         finally
         {
@@ -260,7 +291,11 @@ public static class CastLocalizer
 
     private sealed class CacheDocument
     {
-        public int Version { get; set; } = 2;
+        /// <summary>
+        ///     2 = 早期版本（把「查询失败」也写成空字符串，会永久钉死）；
+        ///     3 = 只缓存成功结果，空字符串明确表示「查过，确实没有中文名」。
+        /// </summary>
+        public int Version { get; set; } = 3;
 
         public Dictionary<int, string> Characters { get; set; } = new();
     }
@@ -289,7 +324,15 @@ public static class CastLocalizer
             {
                 var document = JsonSerializer.Deserialize<CacheDocument>(File.ReadAllText(file));
                 if (document?.Characters == null) return;
-                foreach (var pair in document.Characters) CharacterNames.TryAdd(pair.Key, pair.Value);
+
+                // 旧版本会把失败写成空串，升级时丢掉这些空值，让它们重新查一次。
+                var dropEmpty = document.Version < 3;
+
+                foreach (var pair in document.Characters)
+                {
+                    if (dropEmpty && string.IsNullOrEmpty(pair.Value)) continue;
+                    CharacterNames.TryAdd(pair.Key, pair.Value);
+                }
             }
             catch
             {
@@ -298,7 +341,7 @@ public static class CastLocalizer
         }
     }
 
-    private static void SaveCache()
+    private static void SaveCache(ILogger log)
     {
         if (!_dirty) return;
 
@@ -307,7 +350,11 @@ public static class CastLocalizer
             if (!_dirty) return;
 
             var file = GetCacheFilePath();
-            if (file == null) return;
+            if (file == null)
+            {
+                log.Warn("Bangumi: 无法确定插件配置目录，角色名缓存不会落盘（每次刷新都会重新查询）");
+                return;
+            }
 
             try
             {
@@ -317,10 +364,12 @@ public static class CastLocalizer
                 };
                 File.WriteAllText(file, JsonSerializer.Serialize(document));
                 _dirty = false;
+                log.Debug("Bangumi: 角色名缓存已写入 {0}（{1} 条）", file, CharacterNames.Count);
             }
-            catch
+            catch (Exception ex)
             {
-                // 写盘失败不影响本次翻译结果，下次再试。
+                // 写盘失败不影响本次翻译结果，但要让日志里能看见，否则会长期静默。
+                log.Warn("Bangumi: 写入角色名缓存失败 {0}: {1}", file, ex.Message);
             }
         }
     }

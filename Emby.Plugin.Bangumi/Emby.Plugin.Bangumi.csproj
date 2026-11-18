@@ -7,15 +7,15 @@
     <DefineConstants>EMBY</DefineConstants>
     <!--
       本 fork 的版本号，覆盖根目录 Directory.Build.props 里的上游版本。
-      编码规则：<上游下一版本>.<1000 + 修订号>，例如 1.7.8.1001、1.7.8.1003。
+      编码规则：<上游下一版本>.<1000 + 修订号>，例如 1.7.8.1001、1.7.8.1004。
       留出 1000 的偏移是为了不和上游 CI 的 `tag.距tag提交数` 版本撞车
       （上游距离通常远小于 1000）。
       必须随每次发版递增：Emby 的插件页 ETag 由插件版本决定，
       版本不变时浏览器会一直复用缓存里的旧配置页（304），看不到新 UI。
     -->
-    <Version>1.7.8.1003</Version>
-    <AssemblyVersion>1.7.8.1003</AssemblyVersion>
-    <FileVersion>1.7.8.1003</FileVersion>
+    <Version>1.7.8.1004</Version>
+    <AssemblyVersion>1.7.8.1004</AssemblyVersion>
+    <FileVersion>1.7.8.1004</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
