@@ -82,9 +82,13 @@ public class SeasonProvider(BangumiApi api, ILogger log)
 
         (await api.GetSubjectPersonInfos(subject.Id, cancellationToken)).ToList().ForEach(result.AddPerson);
 
-        var characters = (await api.GetSubjectCharacters(subject.Id, cancellationToken)).ToList();
-        await CastLocalizer.LocalizeAsync(api, subject.Id, characters, log, cancellationToken);
-        characters.ForEach(result.AddPerson);
+        var characters = await CastLocalizer.GetCharactersAsync(api, subject.Id, cancellationToken);
+        if (characters != null)
+        {
+            var people = CastLocalizer.ToPeople(characters);
+            await CastLocalizer.LocalizeAsync(api, subject.Id, characters, people, log, cancellationToken);
+            people.ForEach(result.AddPerson);
+        }
 
         return result;
     }
