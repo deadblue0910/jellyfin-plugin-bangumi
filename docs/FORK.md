@@ -36,6 +36,16 @@
 - 版本号同时决定 Emby 插件列表里显示的版本。
 - Release tag 用 `emby-v<dll 版本>-r<N>`，与上游 tag 区分开。
 
+## 防呆：禁止推上游
+
+上游 remote 的 push 地址已设为 `no_push`（物理不可写），仓库还自带一个 pre-push 钩子作为第二道拦截。重新 clone 后执行一次：
+
+```powershell
+Copy-Item tools\pre-push .git\hooks\pre-push
+```
+
+钩子会拒绝除 `origin` 以外的所有 remote，以及任何 URL 含 `kookxiang/jellyfin-plugin-bangumi` 的推送；确需绕过时用 `git push --no-verify <remote> <branch>`。
+
 ## 新增文件清单（L1）
 
 | 文件 | 作用 |

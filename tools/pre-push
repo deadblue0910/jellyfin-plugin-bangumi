@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# 保险钩子：只允许推送到自己的 fork（origin），永不写上游。
+#
+# 安装（重新 clone 后执行一次）：
+#   cp tools/pre-push .git/hooks/pre-push
+# 或 Windows PowerShell：
+#   Copy-Item tools\pre-push .git\hooks\pre-push
+#
+# 行为：
+#   放行  git push origin ...
+#   拦截  git push upstream ... / git push <其它 remote> ...
+#         以及任何 URL 含 kookxiang/jellyfin-plugin-bangumi 的推送
+#
+# 临时绕过（刻意写全参数才生效）：
+#   git push --no-verify <remote> <branch>
+
+remote="$1"
+url="$2"
+
+case "$remote" in
+    origin)
+        ;;
+    *)
+        echo "" >&2
+        echo "[pre-push] 已拦截：目标 remote 是 '$remote'，不是 origin。" >&2
+        echo "[pre-push] 本项目约定：只推自己的 fork，永不写上游仓库。" >&2
+        echo "[pre-push] 确需推送请显式加 --no-verify。" >&2
+        echo "" >&2
+        exit 1
+        ;;
+esac
+
+case "$url" in
+    *kookxiang/jellyfin-plugin-bangumi*)
+        echo "" >&2
+        echo "[pre-push] 已拦截：目标地址指向上游仓库 $url" >&2
+        echo "[pre-push] 确需推送请显式加 --no-verify。" >&2
+        echo "" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
