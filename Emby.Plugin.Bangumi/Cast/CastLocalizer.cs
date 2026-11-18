@@ -15,14 +15,14 @@ using MediaBrowser.Model.Logging;
 namespace Jellyfin.Plugin.Bangumi.Cast;
 
 /// <summary>
-///     把演职人员列表里的演员名（<see cref="PersonInfo.Name" />）和角色名（<see cref="PersonInfo.Role" />）
-///     替换成 Bangumi 的中文名，对应上游 PR #256 的「演职人员界面支持中文」。
+///     把演职人员列表里的<b>角色名</b>（<see cref="PersonInfo.Role" />）替换成 Bangumi 的中文名。
 ///     <para>
-///         请求策略（按优先级）：
-///         1. 角色列表按 subject 缓存 10 分钟，同一 subject 在一轮刷新里只请求一次；
-///         2. 单个角色 / 人物的中文名进程内缓存，并<strong>落盘</strong>（Emby 没有 HTTP 缓存层，重启后不必重拉）；
-///         3. 只有缓存缺失时才发 <c>/v0/characters/{id}</c>、<c>/v0/persons/{id}</c>；
-///         4. 并发 3，单条目上限 20 角色 / 40 演员，超限直接跳过。
+///         只改 Role、不动 Name：Role 是「条目 ↔ 人物」关联上的字段，改它不会新建人物实体；
+///         Name 决定人物实体身份，改了会让 Emby 按新名字建条目，切回上游插件时会留下重复人物。
+///     </para>
+///     <para>
+///         请求策略：角色列表按 subject 缓存 10 分钟；角色中文名进程内缓存并落盘到
+///         <c>BangumiCast.json</c>，重启后不重复请求；并发 3，单条目上限 20 个角色。
 ///     </para>
 /// </summary>
 public static class CastLocalizer
@@ -33,11 +33,6 @@ public static class CastLocalizer
     ///     单个条目最多翻译多少个角色；超出直接跳过，避免一次刷新打出上百个请求。
     /// </summary>
     private const int MaxCharactersPerSubject = 20;
-
-    /// <summary>
-    ///     单个条目最多翻译多少个演员。
-    /// </summary>
-    private const int MaxActorsPerSubject = 40;
 
     /// <summary>
     ///     角色列表的缓存有效期。一轮刷新里 Series 和 Season 会先后拿同一个 subject，
@@ -51,11 +46,6 @@ public static class CastLocalizer
     ///     角色 id → 中文名；空字符串表示「查过了但没有中文名」，避免重复请求。
     /// </summary>
     private static readonly ConcurrentDictionary<int, string> CharacterNames = new();
-
-    /// <summary>
-    ///     人物 id → 中文名；同样带负缓存。
-    /// </summary>
-    private static readonly ConcurrentDictionary<int, string> PersonNames = new();
 
     private static readonly ConcurrentDictionary<int, SubjectEntry> SubjectCache = new();
 
@@ -116,7 +106,7 @@ public static class CastLocalizer
     }
 
     /// <summary>
-    ///     就地修改 <paramref name="people" />。<b>任何失败都只影响单条记录</b>，
+    ///     就地修改 <paramref name="people" /> 里的 Role。<b>任何失败都只影响单个角色</b>，
     ///     最坏情况是保留原名，绝不丢整批演职人员。
     /// </summary>
     public static async Task LocalizeAsync(BangumiApi api, int subjectId, IReadOnlyList<RelatedCharacter> characters,
@@ -127,7 +117,7 @@ public static class CastLocalizer
 
         if (characters.Count > MaxCharactersPerSubject)
         {
-            log.Info("Bangumi: 条目 {0} 有 {1} 个角色，超过上限 {2}，跳过演职人员翻译",
+            log.Info("Bangumi: 条目 {0} 有 {1} 个角色，超过上限 {2}，跳过角色名翻译",
                 subjectId, characters.Count, MaxCharactersPerSubject);
             return;
         }
@@ -138,67 +128,33 @@ public static class CastLocalizer
         {
             using var semaphore = new SemaphoreSlim(MaxConcurrency);
 
-            // 1) 角色名：character.Name → 简体中文名
-            var roleTasks = characters
+            var tasks = characters
                 .Select(async character => (
                     character.Name,
                     Translated: await TranslateCharacterAsync(api, character.Id, semaphore, log, token).ConfigureAwait(false)))
                 .ToList();
-            var roleResults = await Task.WhenAll(roleTasks).ConfigureAwait(false);
+            var results = await Task.WhenAll(tasks).ConfigureAwait(false);
 
             var roleMap = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var (original, translated) in roleResults)
+            foreach (var (original, translated) in results)
                 if (!string.IsNullOrEmpty(original) && !string.IsNullOrEmpty(translated) && original != translated)
                     roleMap[original] = translated;
 
-            // 2) 演员名：PersonInfo 的 ProviderIds 里就是演员的 Bangumi id
-            var actorIds = new List<int>();
-            foreach (var person in people)
-            {
-                if (person.ProviderIds == null) continue;
-                if (!person.ProviderIds.TryGetValue(Constants.ProviderName, out var raw)) continue;
-                if (!int.TryParse(raw, out var actorId) || actorId <= 0) continue;
-                if (actorIds.Contains(actorId)) continue;
-                actorIds.Add(actorId);
-                if (actorIds.Count >= MaxActorsPerSubject) break;
-            }
+            if (roleMap.Count == 0)
+                return;
 
-            var personTasks = actorIds
-                .Select(async id => (Id: id, Name: await TranslatePersonAsync(api, id, semaphore, log, token).ConfigureAwait(false)))
-                .ToList();
-            var personResults = await Task.WhenAll(personTasks).ConfigureAwait(false);
-
-            var personMap = personResults
-                .Where(r => !string.IsNullOrEmpty(r.Name))
-                .GroupBy(r => r.Id)
-                .ToDictionary(g => g.Key, g => g.First().Name);
-
-            // 3) 回填
             var changed = 0;
             foreach (var person in people)
             {
-                if (person.ProviderIds != null
-                    && person.ProviderIds.TryGetValue(Constants.ProviderName, out var raw)
-                    && int.TryParse(raw, out var actorId)
-                    && personMap.TryGetValue(actorId, out var name)
-                    && !string.IsNullOrEmpty(name)
-                    && name != person.Name)
-                {
-                    person.Name = name;
-                    changed++;
-                }
-
-                if (!string.IsNullOrEmpty(person.Role)
-                    && roleMap.TryGetValue(person.Role, out var role)
-                    && role != person.Role)
-                {
-                    person.Role = role;
-                    changed++;
-                }
+                if (string.IsNullOrEmpty(person.Role)) continue;
+                if (!roleMap.TryGetValue(person.Role, out var role)) continue;
+                if (role == person.Role) continue;
+                person.Role = role;
+                changed++;
             }
 
             if (changed > 0)
-                log.Info("Bangumi: 条目 {0} 已翻译 {1} 处演职人员", subjectId, changed);
+                log.Info("Bangumi: 条目 {0} 已翻译 {1} 个角色名", subjectId, changed);
         }
         catch (OperationCanceledException)
         {
@@ -206,7 +162,7 @@ public static class CastLocalizer
         }
         catch (Exception ex)
         {
-            log.Error("Bangumi: 翻译演职人员失败 (subject {0}): {1}", subjectId, ex);
+            log.Error("Bangumi: 翻译角色名失败 (subject {0}): {1}", subjectId, ex);
         }
         finally
         {
@@ -247,48 +203,13 @@ public static class CastLocalizer
         }
     }
 
-    private static async Task<string> TranslatePersonAsync(BangumiApi api, int id, SemaphoreSlim semaphore,
-        ILogger log, CancellationToken token)
-    {
-        if (id <= 0) return string.Empty;
-        if (PersonNames.TryGetValue(id, out var cached)) return cached;
-
-        await semaphore.WaitAsync(token).ConfigureAwait(false);
-        try
-        {
-            if (PersonNames.TryGetValue(id, out cached)) return cached;
-            var detail = await api.GetPerson(id, token).ConfigureAwait(false);
-            var translated = detail?.TranslatedName ?? string.Empty;
-            PersonNames[id] = translated;
-            _dirty = true;
-            return translated;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            log.Debug("Bangumi: 人物 {0} 翻译失败: {1}", id, ex.Message);
-            PersonNames[id] = string.Empty;
-            _dirty = true;
-            return string.Empty;
-        }
-        finally
-        {
-            semaphore.Release();
-        }
-    }
-
     #region 落盘缓存
 
     private sealed class CacheDocument
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
 
         public Dictionary<int, string> Characters { get; set; } = new();
-
-        public Dictionary<int, string> Persons { get; set; } = new();
     }
 
     private sealed record SubjectEntry(DateTime CachedAt, List<RelatedCharacter> Characters);
@@ -314,9 +235,8 @@ public static class CastLocalizer
             try
             {
                 var document = JsonSerializer.Deserialize<CacheDocument>(File.ReadAllText(file));
-                if (document == null) return;
+                if (document?.Characters == null) return;
                 foreach (var pair in document.Characters) CharacterNames.TryAdd(pair.Key, pair.Value);
-                foreach (var pair in document.Persons) PersonNames.TryAdd(pair.Key, pair.Value);
             }
             catch
             {
@@ -340,8 +260,7 @@ public static class CastLocalizer
             {
                 var document = new CacheDocument
                 {
-                    Characters = CharacterNames.ToDictionary(pair => pair.Key, pair => pair.Value),
-                    Persons = PersonNames.ToDictionary(pair => pair.Key, pair => pair.Value)
+                    Characters = CharacterNames.ToDictionary(pair => pair.Key, pair => pair.Value)
                 };
                 File.WriteAllText(file, JsonSerializer.Serialize(document));
                 _dirty = false;

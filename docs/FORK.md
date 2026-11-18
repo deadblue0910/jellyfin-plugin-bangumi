@@ -29,30 +29,31 @@
 
 ## 发版规则
 
-- 每次发布递增 `Emby.Plugin.Bangumi/Emby.Plugin.Bangumi.csproj` 里的 `<Version>` / `<AssemblyVersion>` / `<FileVersion>`（当前 **1.7.1.1**）。
+- 每次发布递增 `Emby.Plugin.Bangumi/Emby.Plugin.Bangumi.csproj` 里的 `<Version>` / `<AssemblyVersion>` / `<FileVersion>`（当前 **1.7.8.1001**）。
+- 编码规则：**`<上游下一版本>.<1000 + 修订号>`**，例如 `1.7.8.1001`、`1.7.8.1002`。留 1000 的偏移是为了不和上游 CI 的 `tag.距tag提交数` 版本撞车（上游 distance 通常远小于 1000）；撞车的后果是两份 dll 的 ETag 相同，配置页会互相“串页”。
 - **不要**改根目录的 `Directory.Build.props`：那是上游共享文件，改它会和上游的版本号变更永久冲突。
 - 为什么必须递增：Emby 插件页的 `ETag` 由**插件版本**决定（同一插件的 HTML 和 JS 共享同一个 ETag，不同插件各不相同）。版本不变时浏览器带着旧 ETag 发条件请求，服务端回 `304 Not Modified`，用户会一直看到缓存里的旧配置页——表现为「更新插件后配置页没有新选项」。
 - 版本号同时决定 Emby 插件列表里显示的版本。
-- Release tag 用 `emby-v<上游版本>-r<N>`（如 `emby-v1.7.1-r2`），与 dll 内部版本分开编号。
+- Release tag 用 `emby-v<dll 版本>-r<N>`，与上游 tag 区分开。
 
 ## 新增文件清单（L1）
 
 | 文件 | 作用 |
 |---|---|
 | `Emby.Plugin.Bangumi/BangumiApi.EmbyCast.cs` | partial 扩展：`GetSubjectRelatedCharacters()`（`/v0/subjects/{id}/characters`）、`GetCharacterDetail()`（`/v0/characters/{id}`）。共享部分 `BaseUrl` 是 private，只能在同类内拼 URL |
-| `Emby.Plugin.Bangumi/Cast/CastLocalizer.cs` | 演职人员中文化：把 `PersonInfo.Name`（演员）和 `PersonInfo.Role`（角色）换成 infobox 里的「简体中文名」；**三层缓存**：角色列表按 subject 缓存 10 分钟（同一 subject 一轮刷新只请求一次）、角色/人物中文名进程内缓存、并落盘到配置目录旁的 `BangumiCast.json`（重启不必重拉）；并发 3、单条目上限 20 角色 / 40 演员 |
+| `Emby.Plugin.Bangumi/Cast/CastLocalizer.cs` | **角色名中文化**：只把 `PersonInfo.Role` 换成 Bangumi infobox 里的「简体中文名」，**不动 `Name`**（理由见下）；缓存：角色列表按 subject 缓存 10 分钟（同一 subject 一轮刷新只请求一次）、角色中文名进程内缓存并落盘到 `BangumiCast.json`；并发 3、单条目上限 20 角色 |
 
 ## 已实现的功能（相对上游 Emby）
 
 | 功能 | 开关 | 实现位置 | 备注 |
 |---|---|---|---|
-| 演职人员中文化 | 配置页「人物翻译」= 优先使用中文翻译（`PersonTranslationPreference`） | `Cast/CastLocalizer.cs` + 三个 provider 调用点 | 移植上游 PR #256 的核心语义（该 PR 用 `#if !EMBY` 把 Emby 排除了）。`Name`/`Role` 都翻译 |
+| 角色名中文化 | 配置页「人物翻译」= 优先使用中文翻译（`PersonTranslationPreference`） | `Cast/CastLocalizer.cs` + 三个 provider 调用点 | 语义来自上游 PR #256（该 PR 用 `#if !EMBY` 把 Emby 排除了），但**只翻 Role**：Role 是「条目 ↔ 人物」关联字段，改它不新建人物实体，切回上游刷新即可还原；`Name` 决定人物实体身份，改它会留下重复人物 |
 | 配置页补上「人物翻译」下拉框 | — | `Configuration/ConfigPage.html` | 共享配置里一直有 `PersonTranslationPreference`（默认 `Original`），但 Emby 配置页从未提供入口，导致该开关在 Emby 侧改不了 |
 
 已知限制（详见 `PLAN`/对话记录）：
 
-- 翻译请求为 `1 + N角色 + M演员` 次/条目（首次、缓存未命中时）；角色列表 10 分钟内复用，中文名落盘后重启不再请求。
-- 修改 `PersonInfo.Name` 可能让 Emby 认为人物改名而新建 Person 条目，**目前实测未出现重复，但样本不足**；若出现重复，可退化为只翻译 `Role`。
+- 翻译请求为 `1 + N角色` 次/条目（首次、缓存未命中时）；角色列表 10 分钟内复用，角色中文名落盘后重启不再请求。不再请求 `/v0/persons/{id}`。
+- **演员名保持原名**（不翻译 `Name`）。这样与上游插件互换时人物实体不变、不会产生重复人物；代价是演职人员列表里演员仍显示日文名。
 - 未实现「把角色当作演职人员」（PR #256 的 `AddCharacterToPerson`）：Emby 不认 `c{id}` 前缀、没有人物图片 provider，会污染全局人物库。
 
 ## 移植清单（Jellyfin → Emby）
