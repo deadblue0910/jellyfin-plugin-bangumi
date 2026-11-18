@@ -5,6 +5,14 @@
     <LangVersion>12.0</LangVersion>
     <RootNamespace>Jellyfin.Plugin.Bangumi</RootNamespace>
     <DefineConstants>EMBY</DefineConstants>
+    <!--
+      本 fork 的版本号，覆盖根目录 Directory.Build.props 里的上游版本。
+      必须随每次发版递增：Emby 的插件页 ETag 由插件版本决定，
+      版本不变时浏览器会一直复用缓存里的旧配置页（拿到 304），看不到新 UI。
+    -->
+    <Version>1.7.1.1</Version>
+    <AssemblyVersion>1.7.1.1</AssemblyVersion>
+    <FileVersion>1.7.1.1</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

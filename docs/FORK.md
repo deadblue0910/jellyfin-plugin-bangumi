@@ -27,6 +27,14 @@
 
 > 上游 `Emby.Plugin.Bangumi.csproj` 链接的共享文件：`BangumiApi.cs`、`Configuration/PluginConfiguration.cs`、`Model/*.cs`、`Utils/ImageUrlNormalizer.cs`、`OAuth/*.cs`（排除 `OAuthController.cs`）、`ScheduledTask/RatingRefreshTask.cs`、`ScheduledTask/TokenRefreshTask.cs`。改这些等于同时改 Jellyfin 插件。
 
+## 发版规则
+
+- 每次发布递增 `Emby.Plugin.Bangumi/Emby.Plugin.Bangumi.csproj` 里的 `<Version>` / `<AssemblyVersion>` / `<FileVersion>`（当前 **1.7.1.1**）。
+- **不要**改根目录的 `Directory.Build.props`：那是上游共享文件，改它会和上游的版本号变更永久冲突。
+- 为什么必须递增：Emby 插件页的 `ETag` 由**插件版本**决定（同一插件的 HTML 和 JS 共享同一个 ETag，不同插件各不相同）。版本不变时浏览器带着旧 ETag 发条件请求，服务端回 `304 Not Modified`，用户会一直看到缓存里的旧配置页——表现为「更新插件后配置页没有新选项」。
+- 版本号同时决定 Emby 插件列表里显示的版本。
+- Release tag 用 `emby-v<上游版本>-r<N>`（如 `emby-v1.7.1-r2`），与 dll 内部版本分开编号。
+
 ## 新增文件清单（L1）
 
 | 文件 | 作用 |
